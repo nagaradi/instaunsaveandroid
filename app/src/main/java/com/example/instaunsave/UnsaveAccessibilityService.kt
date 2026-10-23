@@ -7,52 +7,58 @@ import android.widget.Toast
 
 class UnsaveAccessibilityService : AccessibilityService() {
 
+    private var lastMessage = ""
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
-        val packageName = event.packageName?.toString() ?: return
+        if (event.packageName?.toString() != "com.instagram.android") {
+            return
+        }
 
-        // Only inspect Instagram while it is in the foreground.
-        if (packageName != "com.instagram.android") return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            return
+        }
 
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                // Inspect visible UI only; do not click or remove posts.
-                val root: AccessibilityNodeInfo =
-                    rootInActiveWindow ?: return
+        val root = rootInActiveWindow ?: return
+        val texts = mutableListOf<String>()
+        collectVisibleText(root, texts)
 
-                val screenText = root.textContentForInspection()
+        val allText = texts.joinToString(" ")
+        val hasUnsave = texts.any {
+            it.trim().equals("Unsave", ignoreCase = true)
+        }
 
-                // Diagnostic signal only, not proof that a post was removed.
-                if (screenText.contains("saved", ignoreCase = true)) {
-                    // Saved-related screen detected.
-                }
-            }
+        val message = when {
+            hasUnsave ->
+                "Instagram Unsave button detected. Posts selected: check Instagram."
+            allText.contains("Manage", ignoreCase = true) &&
+                allText.contains("Saved", ignoreCase = true) ->
+                "Instagram Saved/Manage screen detected."
+            else -> ""
+        }
+
+        if (message.isNotEmpty() && message != lastMessage) {
+            lastMessage = message
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun AccessibilityNodeInfo.textContentForInspection(): String {
-        val result = StringBuilder()
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.add(this)
+    private fun collectVisibleText(
+        node: AccessibilityNodeInfo,
+        result: MutableList<String>
+    ) {
+        node.text?.toString()?.let { result.add(it) }
+        node.contentDescription?.toString()?.let { result.add(it) }
 
-        while (stack.isNotEmpty()) {
-            val node = stack.removeLast()
-            node.text?.let { result.append(it).append(' ') }
-            node.contentDescription?.let {
-                result.append(it).append(' ')
-            }
-
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { stack.add(it) }
-            }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectVisibleText(child, result)
         }
-
-        return result.toString()
     }
 
     override fun onInterrupt() {
-        // No ongoing automated actions to interrupt.
+        // No automatic actions are running.
     }
 }
