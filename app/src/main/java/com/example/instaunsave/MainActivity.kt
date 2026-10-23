@@ -15,15 +15,20 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private var count = 0
     private val totalPosts = 12000
-    private val batchSize = 20
+    private val prefs by lazy {
+        getSharedPreferences("unsave_progress", MODE_PRIVATE)
+    }
 
+    private var count = 0
     private lateinit var countLabel: TextView
+    private lateinit var remainingLabel: TextView
     private lateinit var statusLabel: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        count = prefs.getInt("count", 0).coerceIn(0, totalPosts)
 
         window.statusBarColor = Color.rgb(15, 15, 18)
         window.navigationBarColor = Color.rgb(15, 15, 18)
@@ -36,15 +41,15 @@ class MainActivity : Activity() {
 
     private fun render() {
         val bg = Color.rgb(15, 15, 18)
-        val panel = Color.rgb(28, 28, 34)
         val white = Color.rgb(245, 245, 248)
         val muted = Color.rgb(180, 180, 190)
         val accent = Color.rgb(190, 50, 220)
+        val gray = Color.rgb(73, 73, 86)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP
-            setPadding(dp(22), dp(30), dp(22), dp(22))
+            setPadding(dp(22), dp(25), dp(22), dp(22))
             setBackgroundColor(bg)
         }
 
@@ -57,7 +62,9 @@ class MainActivity : Activity() {
             this.text = text
             textSize = size
             setTextColor(color)
-            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            if (bold) {
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
             setPadding(0, dp(5), 0, dp(5))
         }
 
@@ -84,86 +91,80 @@ class MainActivity : Activity() {
         }
 
         root.addView(label("Insta Unsave", 29f, white, true))
-        root.addView(label("Saved posts progress tracker", 15f, muted))
+        root.addView(label("Saved posts batch helper", 15f, muted))
 
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            setBackgroundColor(panel)
-        }
-
-        val cardParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        cardParams.topMargin = dp(20)
-        root.addView(card, cardParams)
-
-        card.addView(label("How to use", 19f, white, true))
-        card.addView(
+        root.addView(
             label(
-                "1. Open Instagram Saved posts.\n" +
-                "2. Select and Unsave up to 20 posts manually.\n" +
-                "3. Return here and tap Confirm 20 removed.\n" +
-                "The counter tracks your progress only.",
+                "1. Instagram kholen aur Saved posts mein jaayen.\n" +
+                "2. Instagram mein posts ko manually Unsave karein.\n" +
+                "3. Jitni posts sach mein Unsave hui hain, utni confirm karein.\n\n" +
+                "Batch buttons sirf confirmation ke liye hain; " +
+                "ye Instagram mein automatic Unsave nahi karte.",
                 15f,
                 muted
             )
         )
 
-        countLabel = label("Progress: $count / $totalPosts", 22f, white, true)
-        val countParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        countParams.topMargin = dp(18)
-        root.addView(countLabel, countParams)
+        countLabel = label("", 22f, white, true)
+        root.addView(countLabel)
 
-        val remaining = label("", 15f, muted)
-        root.addView(remaining)
+        remainingLabel = label("", 15f, muted)
+        root.addView(remainingLabel)
 
         fun updateProgress() {
-            countLabel.text = "Progress: $count / $totalPosts"
-            remaining.text = "Remaining: ${totalPosts - count} posts"
+            countLabel.text = "Confirmed progress: $count / $totalPosts"
+            remainingLabel.text = "Target remaining: ${totalPosts - count}"
         }
 
         addButton("Open Instagram") {
             openInstagram()
         }
 
-        addButton("Confirm 20 posts removed", Color.rgb(73, 73, 86)) {
-            if (count + batchSize <= totalPosts) {
-                count += batchSize
-                updateProgress()
-                statusLabel.text =
-                    "Progress updated. Confirm posts were actually removed."
-            } else {
-                count = totalPosts
-                updateProgress()
-                statusLabel.text = "Target count reached."
-            }
+        addButton("Confirm 100 actually removed", gray) {
+            confirmRemoved(100)
         }
 
-        addButton("Reset counter", Color.rgb(73, 73, 86)) {
+        addButton("Confirm 200 actually removed", gray) {
+            confirmRemoved(200)
+        }
+
+        addButton("Reset progress", gray) {
             count = 0
+            prefs.edit().putInt("count", count).apply()
             updateProgress()
-            statusLabel.text = "Counter reset."
+            statusLabel.text = "Progress reset."
         }
 
         statusLabel = label(
-            "This app does not automatically select or Unsave Instagram posts.",
+            "Progress tabhi confirm karein jab posts sach mein Unsave hui hon.",
             13f,
             muted
         )
-        val statusParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        statusParams.topMargin = dp(12)
-        root.addView(statusLabel, statusParams)
+        root.addView(statusLabel)
 
         updateProgress()
         setContentView(root)
+    }
+
+    private fun confirmRemoved(batchSize: Int) {
+        if (count >= totalPosts) {
+            statusLabel.text = "Target already reached."
+            return
+        }
+
+        val remaining = totalPosts - count
+        val actualRemoved = minOf(batchSize, remaining)
+
+        // This confirmation does not independently verify Instagram.
+        // Only use it after you have actually unsaved this many posts.
+        count += actualRemoved
+        prefs.edit().putInt("count", count).apply()
+
+        countLabel.text = "Confirmed progress: $count / $totalPosts"
+        remainingLabel.text = "Target remaining: ${totalPosts - count}"
+        statusLabel.text =
+            "You confirmed $actualRemoved posts. " +
+            "The app cannot verify Instagram's actual state."
     }
 
     private fun openInstagram() {
