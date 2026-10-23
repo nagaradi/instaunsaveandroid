@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -15,25 +16,21 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private val totalPosts = 12000
     private val prefs by lazy {
-        getSharedPreferences("unsave_progress", MODE_PRIVATE)
+        getSharedPreferences("unsave_helper", MODE_PRIVATE)
     }
-
-    private var count = 0
-    private lateinit var countLabel: TextView
-    private lateinit var remainingLabel: TextView
     private lateinit var statusLabel: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        count = prefs.getInt("count", 0).coerceIn(0, totalPosts)
-
         window.statusBarColor = Color.rgb(15, 15, 18)
         window.navigationBarColor = Color.rgb(15, 15, 18)
-
         render()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::statusLabel.isInitialized) updateStatus()
     }
 
     private fun dp(value: Int): Int =
@@ -53,26 +50,16 @@ class MainActivity : Activity() {
             setBackgroundColor(bg)
         }
 
-        fun label(
-            text: String,
-            size: Float,
-            color: Int,
-            bold: Boolean = false
-        ) = TextView(this).apply {
-            this.text = text
-            textSize = size
-            setTextColor(color)
-            if (bold) {
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
+        fun label(text: String, size: Float, color: Int, bold: Boolean = false) =
+            TextView(this).apply {
+                this.text = text
+                textSize = size
+                setTextColor(color)
+                if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(0, dp(5), 0, dp(5))
             }
-            setPadding(0, dp(5), 0, dp(5))
-        }
 
-        fun addButton(
-            text: String,
-            color: Int = accent,
-            action: () -> Unit
-        ) {
+        fun addButton(text: String, color: Int = accent, action: () -> Unit) {
             val button = Button(this).apply {
                 this.text = text
                 setTextColor(Color.WHITE)
@@ -81,113 +68,79 @@ class MainActivity : Activity() {
                 textSize = 16f
                 setOnClickListener { action() }
             }
-
             val params = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(52)
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
             )
             params.topMargin = dp(9)
             root.addView(button, params)
         }
 
         root.addView(label("Insta Unsave", 29f, white, true))
-        root.addView(label("Saved posts batch helper", 15f, muted))
+        root.addView(label("One-tap Unsave helper", 16f, muted))
+        root.addView(label(
+            "How to use:\n" +
+                "1. Turn on Insta Unsave Helper in Android Accessibility settings.\n" +
+                "2. Tap Arm one Unsave tap below.\n" +
+                "3. Open Instagram and go to Saved > Manage.\n" +
+                "4. Select the posts you want removed. The helper will try to tap the bottom Unsave button once.\n\n" +
+                "It does not select posts automatically. Check Instagram afterward to confirm the posts were removed.",
+            15f, muted
+        ))
 
-        root.addView(
-            label(
-                "1. Instagram kholen aur Saved posts mein jaayen.\n" +
-                "2. Instagram mein posts ko manually Unsave karein.\n" +
-                "3. Jitni posts sach mein Unsave hui hain, utni confirm karein.\n\n" +
-                "Batch buttons sirf confirmation ke liye hain; " +
-                "ye Instagram mein automatic Unsave nahi karte.",
-                15f,
-                muted
-            )
-        )
+        statusLabel = label("", 14f, white)
+        root.addView(statusLabel)
 
-        countLabel = label("", 22f, white, true)
-        root.addView(countLabel)
-
-        remainingLabel = label("", 15f, muted)
-        root.addView(remainingLabel)
-
-        fun updateProgress() {
-            countLabel.text = "Confirmed progress: $count / $totalPosts"
-            remainingLabel.text = "Target remaining: ${totalPosts - count}"
+        addButton("Open Accessibility Settings", gray) {
+            try {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } catch (_: ActivityNotFoundException) {
+                Toast.makeText(this, "Accessibility settings could not be opened.", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        addButton("Open Instagram") {
+        addButton("Arm one Unsave tap") {
+            prefs.edit().putBoolean("armed", true).apply()
+            updateStatus()
+            Toast.makeText(this, "Armed for one bottom Unsave button. Now open Instagram.", Toast.LENGTH_LONG).show()
+        }
+
+        addButton("Open Instagram", gray) {
             openInstagram()
         }
 
-        addButton("Confirm 100 actually removed", gray) {
-            confirmRemoved(100)
+        addButton("Disarm helper", gray) {
+            prefs.edit().putBoolean("armed", false).apply()
+            updateStatus()
         }
 
-        addButton("Confirm 200 actually removed", gray) {
-            confirmRemoved(200)
-        }
+        root.addView(label(
+            "Safety: the helper acts only after you arm it, and attempts one tap on an exact “Unsave” control near the bottom of Instagram. It cannot guarantee Instagram accepted the action.",
+            13f, muted
+        ))
 
-        addButton("Reset progress", gray) {
-            count = 0
-            prefs.edit().putInt("count", count).apply()
-            updateProgress()
-            statusLabel.text = "Progress reset."
-        }
-
-        statusLabel = label(
-            "Progress tabhi confirm karein jab posts sach mein Unsave hui hon.",
-            13f,
-            muted
-        )
-        root.addView(statusLabel)
-
-        updateProgress()
         setContentView(root)
+        updateStatus()
     }
 
-    private fun confirmRemoved(batchSize: Int) {
-        if (count >= totalPosts) {
-            statusLabel.text = "Target already reached."
-            return
+    private fun updateStatus() {
+        val armed = prefs.getBoolean("armed", false)
+        statusLabel.text = if (armed) {
+            "Status: ARMED — one Unsave tap pending."
+        } else {
+            "Status: Disarmed."
         }
-
-        val remaining = totalPosts - count
-        val actualRemoved = minOf(batchSize, remaining)
-
-        // This confirmation does not independently verify Instagram.
-        // Only use it after you have actually unsaved this many posts.
-        count += actualRemoved
-        prefs.edit().putInt("count", count).apply()
-
-        countLabel.text = "Confirmed progress: $count / $totalPosts"
-        remainingLabel.text = "Target remaining: ${totalPosts - count}"
-        statusLabel.text =
-            "You confirmed $actualRemoved posts. " +
-            "The app cannot verify Instagram's actual state."
     }
 
     private fun openInstagram() {
         try {
-            val launch =
-                packageManager.getLaunchIntentForPackage("com.instagram.android")
-
+            val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
             if (launch != null) {
                 startActivity(launch)
             } else {
-                startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://www.instagram.com/")
-                    )
-                )
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com/")))
             }
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(
-                this,
-                "Instagram could not be opened",
-                Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(this, "Instagram could not be opened.", Toast.LENGTH_SHORT).show()
         }
     }
 }
